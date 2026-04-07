@@ -112219,13 +112219,8 @@ class AdoptDistribution extends base_installer_1.JavaBase {
             });
             const resolvedFullVersion = satisfiedVersions.length > 0 ? satisfiedVersions[0] : null;
             if (!resolvedFullVersion) {
-                const availableOptions = availableVersionsWithBinaries
-                    .map(item => item.version)
-                    .join(', ');
-                const availableOptionsMessage = availableOptions
-                    ? `\nAvailable versions: ${availableOptions}`
-                    : '';
-                throw new Error(`Could not find satisfied version for SemVer '${version}'. ${availableOptionsMessage}`);
+                const availableVersionStrings = availableVersionsWithBinaries.map(item => item.version);
+                throw this.createVersionNotFoundError(version, availableVersionStrings);
             }
             return resolvedFullVersion;
         });
@@ -112574,6 +112569,28 @@ class JavaBase {
             stable
         };
     }
+    createVersionNotFoundError(versionOrRange, availableVersions, additionalContext) {
+        const parts = [
+            `No matching version found for SemVer '${versionOrRange}'.`,
+            `Distribution: ${this.distribution}`,
+            `Package type: ${this.packageType}`,
+            `Architecture: ${this.architecture}`
+        ];
+        // Add additional context if provided (e.g., platform/OS info)
+        if (additionalContext) {
+            parts.push(additionalContext);
+        }
+        if (availableVersions && availableVersions.length > 0) {
+            const maxVersionsToShow = core.isDebug() ? availableVersions.length : 50;
+            const versionsToShow = availableVersions.slice(0, maxVersionsToShow);
+            const truncated = availableVersions.length > maxVersionsToShow;
+            parts.push(`Available versions: ${versionsToShow.join(', ')}${truncated ? ', ...' : ''}`);
+            if (truncated) {
+                parts.push(`(showing first ${maxVersionsToShow} of ${availableVersions.length} versions, enable debug mode to see all)`);
+            }
+        }
+        return new Error(parts.join('\n'));
+    }
     setJavaDefault(version, toolPath) {
         const majorVersion = version.split('.')[0];
         core.exportVariable('JAVA_HOME', toolPath);
@@ -112695,13 +112712,8 @@ class CorrettoDistribution extends base_installer_1.JavaBase {
             });
             const resolvedVersion = matchingVersions.length > 0 ? matchingVersions[0] : null;
             if (!resolvedVersion) {
-                const availableOptions = availableVersions
-                    .map(item => item.version)
-                    .join(', ');
-                const availableOptionsMessage = availableOptions
-                    ? `\nAvailable versions: ${availableOptions}`
-                    : '';
-                throw new Error(`Could not find satisfied version for SemVer '${version}'. ${availableOptionsMessage}`);
+                const availableVersionStrings = availableVersions.map(item => item.version);
+                throw this.createVersionNotFoundError(version, availableVersionStrings);
             }
             return resolvedVersion;
         });
@@ -112935,7 +112947,8 @@ class DragonwellDistribution extends base_installer_1.JavaBase {
                 };
             });
             if (!matchedVersions.length) {
-                throw new Error(`Couldn't find any satisfied version for the specified java-version: "${version}" and architecture: "${this.architecture}".`);
+                const availableVersionStrings = availableVersions.map(item => item.jdk_version);
+                throw this.createVersionNotFoundError(version, availableVersionStrings);
             }
             const resolvedVersion = matchedVersions[0];
             return resolvedVersion;
@@ -113126,6 +113139,7 @@ const base_installer_1 = __nccwpck_require__(59741);
 const http_client_1 = __nccwpck_require__(96255);
 const util_1 = __nccwpck_require__(92629);
 const GRAALVM_DL_BASE = 'https://download.oracle.com/graalvm';
+const GRAALVM_DOWNLOAD_URL = 'https://www.graalvm.org/downloads/';
 const IS_WINDOWS = process.platform === 'win32';
 const GRAALVM_PLATFORM = IS_WINDOWS ? 'windows' : process.platform;
 const GRAALVM_MIN_VERSION = 17;
@@ -113204,7 +113218,10 @@ class GraalVMDistribution extends base_installer_1.JavaBase {
     handleHttpResponse(response, range) {
         const statusCode = response.message.statusCode;
         if (statusCode === http_client_1.HttpCodes.NotFound) {
-            throw new Error(`Could not find GraalVM for SemVer ${range}. Please check if this version is available at ${GRAALVM_DL_BASE}`);
+            // Create the standard error with additional hint about checking the download URL
+            const error = this.createVersionNotFoundError(range);
+            error.message += `\nPlease check if this version is available at ${GRAALVM_DOWNLOAD_URL} . Pick a version from the list.`;
+            throw error;
         }
         if (statusCode === http_client_1.HttpCodes.Unauthorized ||
             statusCode === http_client_1.HttpCodes.Forbidden) {
@@ -113221,8 +113238,8 @@ class GraalVMDistribution extends base_installer_1.JavaBase {
             core.debug(`Found ${versions.length} EA versions`);
             const latestVersion = versions.find(v => v.latest);
             if (!latestVersion) {
-                core.error(`Available versions: ${versions.map(v => v.version).join(', ')}`);
-                throw new Error(`Unable to find latest version for '${javaEaVersion}'`);
+                const availableVersions = versions.map(v => v.version);
+                throw this.createVersionNotFoundError(javaEaVersion, availableVersions, 'Note: No EA build is marked as latest for this version.');
             }
             core.debug(`Latest version found: ${latestVersion.version}`);
             const arch = this.distributionArchitecture();
@@ -113358,13 +113375,8 @@ class JetBrainsDistribution extends base_installer_1.JavaBase {
             });
             const resolvedFullVersion = satisfiedVersions.length > 0 ? satisfiedVersions[0] : null;
             if (!resolvedFullVersion) {
-                const availableOptions = versionsRaw
-                    .map(item => `${item.tag_name} (${item.semver}+${item.build})`)
-                    .join(', ');
-                const availableOptionsMessage = availableOptions
-                    ? `\nAvailable versions: ${availableOptions}`
-                    : '';
-                throw new Error(`Could not find satisfied version for SemVer '${range}'. ${availableOptionsMessage}`);
+                const availableVersionStrings = versionsRaw.map(item => `${item.tag_name} (${item.semver}+${item.build})`);
+                throw this.createVersionNotFoundError(range, availableVersionStrings);
             }
             return resolvedFullVersion;
         });
@@ -113601,13 +113613,8 @@ class LibericaDistributions extends base_installer_1.JavaBase {
                 .filter(item => (0, util_1.isVersionSatisfies)(range, item.version))
                 .sort((a, b) => -semver_1.default.compareBuild(a.version, b.version))[0];
             if (!satisfiedVersion) {
-                const availableOptions = availableVersions
-                    .map(item => item.version)
-                    .join(', ');
-                const availableOptionsMessage = availableOptions
-                    ? `\nAvailable versions: ${availableOptions}`
-                    : '';
-                throw new Error(`Could not find satisfied version for semver ${range}. ${availableOptionsMessage}`);
+                const availableVersionStrings = availableVersions.map(item => item.version);
+                throw this.createVersionNotFoundError(range, availableVersionStrings);
             }
             return satisfiedVersion;
         });
@@ -113893,9 +113900,8 @@ class MicrosoftDistributions extends base_installer_1.JavaBase {
             }
             const foundRelease = yield tc.findFromManifest(range, true, manifest, arch);
             if (!foundRelease) {
-                throw new Error(`Could not find satisfied version for SemVer ${range}.\nAvailable versions: ${manifest
-                    .map(item => item.version)
-                    .join(', ')}`);
+                const availableVersionStrings = manifest.map(item => item.version);
+                throw this.createVersionNotFoundError(range, availableVersionStrings);
             }
             return {
                 url: foundRelease.files[0].download_url,
@@ -114058,7 +114064,7 @@ class OracleDistribution extends base_installer_1.JavaBase {
                     throw new Error(`Http request for Oracle JDK failed with status code: ${response.message.statusCode}`);
                 }
             }
-            throw new Error(`Could not find Oracle JDK for SemVer ${range}`);
+            throw this.createVersionNotFoundError(range);
         });
     }
     getPlatform(platform = process.platform) {
@@ -114150,7 +114156,8 @@ class SapMachineDistribution extends base_installer_1.JavaBase {
                 };
             });
             if (!matchedVersions.length) {
-                throw new Error(`Couldn't find any satisfied version for the specified java-version: "${version}" and architecture: "${this.architecture}".`);
+                const availableVersionStrings = availableVersions.map(item => item.version);
+                throw this.createVersionNotFoundError(version, availableVersionStrings);
             }
             const resolvedVersion = matchedVersions[0];
             return resolvedVersion;
@@ -114389,13 +114396,11 @@ class SemeruDistribution extends base_installer_1.JavaBase {
             });
             const resolvedFullVersion = satisfiedVersions.length > 0 ? satisfiedVersions[0] : null;
             if (!resolvedFullVersion) {
-                const availableOptions = availableVersionsWithBinaries
-                    .map(item => item.version)
-                    .join(', ');
-                const availableOptionsMessage = availableOptions
-                    ? `\nAvailable versions: ${availableOptions}`
-                    : '';
-                throw new Error(`Could not find satisfied version for SemVer version '${version}' for your current OS version for ${this.architecture} architecture ${availableOptionsMessage}`);
+                const availableVersionStrings = availableVersionsWithBinaries.map(item => item.version);
+                // Include platform context to help users understand OS-specific version availability
+                // IBM Semeru builds are OS-specific, so platform info aids in troubleshooting
+                const platformContext = `Platform: ${process.platform}`;
+                throw this.createVersionNotFoundError(version, availableVersionStrings, platformContext);
             }
             return resolvedFullVersion;
         });
@@ -114568,13 +114573,8 @@ class TemurinDistribution extends base_installer_1.JavaBase {
             });
             const resolvedFullVersion = satisfiedVersions.length > 0 ? satisfiedVersions[0] : null;
             if (!resolvedFullVersion) {
-                const availableOptions = availableVersionsWithBinaries
-                    .map(item => item.version)
-                    .join(', ');
-                const availableOptionsMessage = availableOptions
-                    ? `\nAvailable versions: ${availableOptions}`
-                    : '';
-                throw new Error(`Could not find satisfied version for SemVer '${version}'. ${availableOptionsMessage}`);
+                const availableVersionStrings = availableVersionsWithBinaries.map(item => item.version);
+                throw this.createVersionNotFoundError(version, availableVersionStrings);
             }
             return resolvedFullVersion;
         });
@@ -114746,13 +114746,8 @@ class ZuluDistribution extends base_installer_1.JavaBase {
             });
             const resolvedFullVersion = satisfiedVersions.length > 0 ? satisfiedVersions[0] : null;
             if (!resolvedFullVersion) {
-                const availableOptions = availableVersions
-                    .map(item => item.version)
-                    .join(', ');
-                const availableOptionsMessage = availableOptions
-                    ? `\nAvailable versions: ${availableOptions}`
-                    : '';
-                throw new Error(`Could not find satisfied version for semver ${version}. ${availableOptionsMessage}`);
+                const availableVersionStrings = availableVersions.map(item => item.version);
+                throw this.createVersionNotFoundError(version, availableVersionStrings);
             }
             return resolvedFullVersion;
         });
